@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "episode": "sample-bohemian-rhapsody",
+  "title": "The Six-Minute Song Radio Said No To",
+  "policy": {
+    "only_approved_assets_render": true,
+    "unknown_license_allowed": false,
+    "ai_reconstructions_must_be_labelled": true
+  },
+  "scenes": [
+    {
+      "scene": 1,
+      "visual_mode": "archive_motion",
+      "assets": [
+        {
+          "asset_id": "scene-01-example",
+          "status": "pending",
+          "media_type": "image",
+          "kind": "historical_archive",
+          "storage": "repository",
+          "path": "assets/episodes/sample-bohemian-rhapsody/media/scene-01-example.jpg",
+          "download_url": "",
+          "source_page": "",
+          "creator": "",
+          "license": "",
+          "license_url": "",
+          "attribution": "",
+          "sha256": "",
+          "notes": "Template only. Replace with a real, verified asset before approval."
+        }
+      ]
+    }
+  ]
+}
