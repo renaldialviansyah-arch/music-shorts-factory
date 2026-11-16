@@ -65,28 +65,63 @@ def read_episode(path: Path) -> tuple[str, list[dict[str, str]]]:
 
 
 
+
 def make_query(scene: dict[str, str], episode_title: str) -> str:
-    parts = []
-    for key in ("headline", "kicker", "year", "narration"):
-        value = scene.get(key, "")
-        if value:
-            parts.append(value)
-    raw = " ".join(parts) or episode_title
-    raw = re.sub(r"https?://\S+", " ", raw)
-    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]*", raw)
     stop = {
-        "the", "and", "for", "with", "from", "that", "this", "was", "were",
-        "are", "his", "her", "their", "they", "them", "into", "over", "under",
-        "when", "where", "which", "while", "about", "after", "before", "then",
-        "but", "not", "you", "your", "its", "has", "had", "have", "who",
+        "the", "and", "for", "with", "from", "that", "this",
+        "was", "were", "are", "his", "her", "their", "they",
+        "them", "into", "over", "under", "when", "where",
+        "which", "while", "about", "after", "before", "then",
+        "but", "not", "you", "your", "its", "has", "had",
+        "have", "who", "in", "on", "at", "to", "of", "a",
+        "an", "it", "as", "is", "be", "by", "or", "nearly",
+        "nevertheless", "twice", "long"
     }
-    chosen = []
-    for word in words:
-        if word.lower() not in stop and word.lower() not in {x.lower() for x in chosen}:
-            chosen.append(word)
-        if len(chosen) >= 9:
-            break
-    return " ".join(chosen) or episode_title
+
+    def clean_words(value: str) -> list[str]:
+        words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]*", value)
+        result = []
+        for word in words:
+            if word.lower() not in stop:
+                if word.lower() not in [x.lower() for x in result]:
+                    result.append(word)
+        return result
+
+    headline = clean_words(scene.get("headline", ""))
+    kicker = clean_words(scene.get("kicker", ""))
+    year = clean_words(scene.get("year", ""))
+
+    narration = scene.get("narration", "")
+
+    # Look for possible names of people, bands, and places.
+    proper_names = re.findall(
+        r"\b(?:[A-Z][a-z]+|[A-Z]{2,})"
+        r"(?:\s+(?:[A-Z][a-z]+|[A-Z]{2,})){1,3}\b",
+        narration
+    )
+
+    names = []
+    for phrase in proper_names:
+        phrase_words = clean_words(phrase)
+        if phrase_words:
+            names.extend(phrase_words)
+
+    # Prioritize headline, kicker, names, and year.
+    selected = []
+    for word in headline + kicker + names + year:
+        if word.lower() not in [x.lower() for x in selected]:
+            selected.append(word)
+
+    # Add only a few useful narration terms if needed.
+    if len(selected) < 4:
+        for word in clean_words(narration):
+            if word.lower() not in [x.lower() for x in selected]:
+                selected.append(word)
+            if len(selected) >= 7:
+                break
+
+    return " ".join(selected[:9]) or episode_title
+
 
 
 def request_json(params: dict[str, str]) -> dict[str, Any]:
