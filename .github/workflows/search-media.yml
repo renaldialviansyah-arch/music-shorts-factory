@@ -87,7 +87,6 @@ jobs:
           root_manifest="media-review/media-manifest.json"
           incoming_manifest="media-review-new/media-manifest.json"
 
-          # Preserve the currently active manifest under its own episode.
           if [ -f "$root_manifest" ]; then
             current_episode="$(python -c \
               'import json; print(json.load(open("media-review/media-manifest.json", encoding="utf-8")).get("episode", ""))')"
@@ -99,7 +98,6 @@ jobs:
             fi
           fi
 
-          # Restore this episode's previous manifest if it exists.
           if [ -f "$target_manifest" ]; then
             cp "$target_manifest" "$root_manifest"
 
@@ -108,7 +106,6 @@ jobs:
               --incoming "$incoming_manifest" \
               --output "$root_manifest"
           else
-            # First run for this episode: use its fresh search manifest.
             cp "$incoming_manifest" "$root_manifest"
           fi
 
@@ -160,14 +157,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add media-review/media-manifest.json
-          git add media-review/manifests/
-          git add media/ai-reconstructions/
+          git add -A -- media-review/
+
+          if [ -d "media/ai-reconstructions" ]; then
+            git add -A -- media/ai-reconstructions/
+          fi
 
           if git diff --cached --quiet; then
             echo "No repository changes to commit."
           else
-            git commit -m "Update approved-media review and AI image assets"
+            git commit -m "Update media manifest and AI image assets"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
-
