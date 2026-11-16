@@ -1,3 +1,4 @@
+
 {
   "episode": "sample-bohemian-rhapsody",
   "scenes": [
@@ -13,6 +14,22 @@
           "source_page": "https://commons.wikimedia.org/wiki/File:Bohemian_Rhapsody_Track_Sheet_(replica)_(edit)_1975.jpg",
           "download_url": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Bohemian_Rhapsody_Track_Sheet_%28replica%29_%28edit%29_1975.jpg",
           "attribution": "Image: Bohemian Rhapsody Track Sheet (replica) (edit) 1975, by 海獺, Wikimedia Commons, CC BY-SA 4.0.",
+          "changes": "Displayed inside a cinematic archive frame with subtle camera motion."
+        }
+      ]
+    },
+    {
+      "scene": 2,
+      "assets": [
+        {
+          "status": "approved",
+          "media_type": "image",
+          "title": "Skyport Radio Studio",
+          "creator": "Mark Aston (Mark-King-SkyportRadio)",
+          "license": "CC BY-SA 4.0",
+          "source_page": "https://commons.wikimedia.org/wiki/File:Skyport-radio-studio.jpg",
+          "download_url": "https://upload.wikimedia.org/wikipedia/commons/9/98/Skyport-radio-studio.jpg",
+          "attribution": "Image: Skyport Radio Studio, by Mark Aston (Mark-King-SkyportRadio), Wikimedia Commons, CC BY-SA 4.0.",
           "changes": "Displayed inside a cinematic archive frame with subtle camera motion."
         }
       ]
