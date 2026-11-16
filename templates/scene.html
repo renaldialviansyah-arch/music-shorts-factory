@@ -29,7 +29,7 @@
   #archive-mat::after{content:"";position:absolute;inset:0;pointer-events:none;
     background:linear-gradient(180deg,rgba(0,0,0,.28),transparent 24%,transparent 68%,rgba(0,0,0,.48))}
   #archive-tag{position:absolute;left:28px;top:28px;padding:10px 16px;border:1px solid rgba(255,255,255,.4);
-    border-radius:4px;background:rgba(0,0,0,.62);font:700 18px/1 var(--body);letter-spacing:.22em;color:#fff}
+    border-radius:4px;background:rgba(0,0,0,.72);font:700 18px/1 var(--body);letter-spacing:.22em;color:#fff}
   #archive-accent{position:absolute;left:82px;top:1195px;width:916px;height:3px;z-index:3;
     background:linear-gradient(90deg,transparent,var(--accent),var(--accent2),transparent);opacity:.8}
 
@@ -61,7 +61,7 @@
   <div id="bg"></div>
   <svg id="art" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920"></svg>
   <div id="archive"><div id="archive-frame"><div id="archive-mat">
-    <img id="archive-image" alt="Historical archive image">
+    <img id="archive-image" alt="Approved historical or AI reconstruction image">
     <div id="archive-tag">HISTORICAL ARCHIVE</div>
   </div></div></div>
   <div id="archive-accent"></div>
@@ -313,7 +313,7 @@ window.initTimeline = async function (tl) {
   $('channel').textContent = tl.channel || '';
   buildArt(th);
 
-  // Prepare captions and preload archive images before rendering starts.
+  // Prepare captions and preload approved media before rendering.
   const imageTasks = [];
 
   tl.scenes.forEach(sc => {
@@ -331,7 +331,7 @@ window.initTimeline = async function (tl) {
             sc._media_ready = false;
             sc.media_url = '';
             console.warn(
-              'Archive image failed to load; using original SVG visual.'
+              'Media image failed to load; using original SVG visual.'
             );
           })
       );
@@ -358,13 +358,20 @@ function enterScene(si, sc) {
 
   const archive = $('archive');
   const archiveImage = $('archive-image');
+  const archiveTag = $('archive-tag');
 
   if (sc.media_url && sc._media_ready) {
     archiveImage.src = sc.media_url;
+
+    // Label is supplied by the approved-media loader.
+    archiveTag.textContent =
+      sc.media_label || 'HISTORICAL ARCHIVE';
+
     archive.style.display = 'block';
     $('archive-accent').style.display = 'block';
   } else {
     archiveImage.removeAttribute('src');
+    archiveTag.textContent = 'HISTORICAL ARCHIVE';
     archive.style.display = 'none';
     $('archive-accent').style.display = 'none';
   }
@@ -464,7 +471,7 @@ window.renderFrame = function (t) {
   $('content').style.opacity = op;
   refs.g[sc.visual].setAttribute('opacity', op);
 
-  // Approved archive image replaces the center SVG visual.
+  // Approved archive or AI image replaces the center SVG visual.
   const archiveActive = Boolean(sc.media_url && sc._media_ready);
   const archive = $('archive');
 
@@ -614,8 +621,7 @@ window.renderFrame = function (t) {
       cap.innerHTML = '';
 
       S.spans = c.idxs.map(i => {
-        const s =
-          document.createElement('span');
+        const s = document.createElement('span');
         s.className = 'w';
         s.textContent = sc.words[i].w;
 
@@ -650,7 +656,7 @@ window.renderFrame = function (t) {
     cap.style.transform =
       `translateY(${(1 - p) * 22}px) scale(${0.94 + 0.06 * p})`;
   }
-  
+
   // Scene transition wipe
   let wp = -1;
 
