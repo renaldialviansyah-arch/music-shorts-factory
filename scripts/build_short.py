@@ -1,6 +1,6 @@
 
 #!/usr/bin/env python3
-"""Music Shorts Factory - main program: script -> narration -> music -> animation -> MP4."""
+"""Music Shorts Factory - script -> narration -> music -> animation -> MP4."""
 
 import argparse
 import json
@@ -14,8 +14,6 @@ from parse_script import ScriptError, parse_episode
 import make_audio
 import render_video
 
-# Optional archive media integration.
-# If the loader is not installed yet, the original renderer still works.
 try:
     from load_approved_media import load_approved_media
 except ImportError:
@@ -134,6 +132,7 @@ def run(args):
     want_music = str2bool(args.music)
 
     # STEP 1: Generate narration.
+    # Existing Kokoro audio implementation is preserved.
     wavs = []
 
     if want_voice:
@@ -218,9 +217,8 @@ def run(args):
             "Shorten the narration or remove a scene."
         )
 
-    # STEP 2: Load approved archive media.
-    # Only approved assets are loaded by the media loader.
-    # If no manifest or loader exists, the original visuals remain active.
+    # STEP 2: Load manually approved media.
+    # Pending assets are never passed to the renderer.
     manifest_path = Path(args.media_manifest)
 
     if not manifest_path.is_absolute():
@@ -238,6 +236,15 @@ def run(args):
     timeline_scenes = []
 
     for index, scene in enumerate(scenes):
+        media_item = media_by_scene.get(index + 1, {})
+
+        # Backward compatibility with the old loader format.
+        if isinstance(media_item, str):
+            media_url = media_item
+            media_label = "HISTORICAL ARCHIVE" if media_url else ""
+        else:
+            media_url = media_item.get("url", "")
+            media_label = media_item.get("label", "")
 
         timeline_scenes.append({
             "start": round(cursor, 3),
@@ -247,8 +254,10 @@ def run(args):
             "headline": scene["headline"],
             "year": scene["year"],
 
-            # Empty string means use the original SVG visual.
-            "media_url": media_by_scene.get(index + 1, ""),
+            # Approved archive or AI reconstruction image.
+            # Empty URL keeps the original SVG visual active.
+            "media_url": media_url,
+            "media_label": media_label,
 
             "words": word_timings(
                 scene["narration"],
@@ -353,9 +362,10 @@ def run(args):
         "",
         "REMINDER: fact-check every claim before uploading. "
         "AI-written scripts can contain mistakes.",
-        "Narration, visuals and music in this video were "
-        "generated automatically. "
-        "No commercial music, artwork or lyrics were used.",
+        "AI reconstructions, when used, must be visibly labelled "
+        "AI RECONSTRUCTION.",
+        "Approved historical archive media must retain its "
+        "source and license attribution.",
     ]
 
     (
