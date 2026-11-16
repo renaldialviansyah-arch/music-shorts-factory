@@ -38,8 +38,10 @@ def read_episode(path: Path):
             line = line.strip()
             if not line or line.startswith("#") or ":" not in line:
                 continue
+
             key, value = line.split(":", 1)
             key = key.strip().upper()
+
             if key in {"VISUAL", "KICKER", "HEADLINE", "NARRATION", "YEAR"}:
                 item[key.lower()] = value.strip()
 
@@ -117,13 +119,19 @@ Return one image only.
 
 def call_gemini(prompt: str, api_key: str, model: str):
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ],
         "generationConfig": {
             "responseModalities": ["IMAGE"],
             "responseFormat": {
                 "image": {
-                    "aspectRatio": "4:3",
-                    "imageSize": "1K"
+                    "aspectRatio": "ASPECT_RATIO_FOUR_BY_THREE",
+                    "imageSize": "IMAGE_SIZE_ONE_K"
                 }
             }
         }
@@ -143,34 +151,55 @@ def call_gemini(prompt: str, api_key: str, model: str):
     try:
         with urllib.request.urlopen(request, timeout=180) as response:
             raw = response.read()
+
     except urllib.error.HTTPError as exc:
         detail = exc.read(2000).decode("utf-8", errors="replace")
-        raise RuntimeError(f"Gemini HTTP {exc.code}: {detail}") from None
+        raise RuntimeError(
+            f"Gemini HTTP {exc.code}: {detail}"
+        ) from None
+
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Gemini connection failed: {exc.reason}") from None
+        raise RuntimeError(
+            f"Gemini connection failed: {exc.reason}"
+        ) from None
 
     try:
         result = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RuntimeError("Gemini returned an unreadable response.") from None
+        raise RuntimeError(
+            "Gemini returned an unreadable response."
+        ) from None
 
     image_part = None
+
     for candidate in result.get("candidates", []):
         content = candidate.get("content") or {}
+
         for part in content.get("parts", []):
-            inline = part.get("inlineData") or part.get("inline_data")
+            inline = (
+                part.get("inlineData")
+                or part.get("inline_data")
+            )
+
             if inline and inline.get("data"):
                 image_part = inline
                 break
+
         if image_part:
             break
 
     if not image_part:
         feedback = result.get("promptFeedback") or {}
         reason = feedback.get("blockReason")
+
         if reason:
-            raise RuntimeError(f"Gemini blocked the prompt: {reason}")
-        raise RuntimeError("Gemini response contained no image.")
+            raise RuntimeError(
+                f"Gemini blocked the prompt: {reason}"
+            )
+
+        raise RuntimeError(
+            "Gemini response contained no image."
+        )
 
     mime = str(
         image_part.get("mimeType")
@@ -179,59 +208,101 @@ def call_gemini(prompt: str, api_key: str, model: str):
     ).lower()
 
     try:
-        data = base64.b64decode(image_part["data"], validate=True)
+        data = base64.b64decode(
+            image_part["data"],
+            validate=True
+        )
     except (ValueError, binascii.Error, KeyError):
-        raise RuntimeError("Gemini returned invalid image data.") from None
+        raise RuntimeError(
+            "Gemini returned invalid image data."
+        ) from None
 
     if not data or len(data) > MAX_IMAGE_BYTES:
-        raise RuntimeError("Image is empty or exceeds the 15 MB limit.")
+        raise RuntimeError(
+            "Image is empty or exceeds the 15 MB limit."
+        )
 
     signatures = {
-        "image/png": data.startswith(bytes.fromhex("89504E470D0A1A0A")),
-        "image/jpeg": data.startswith(bytes.fromhex("FFD8FF")),
+        "image/png": data.startswith(
+            bytes.fromhex("89504E470D0A1A0A")
+        ),
+        "image/jpeg": data.startswith(
+            bytes.fromhex("FFD8FF")
+        ),
     }
 
     if mime not in signatures or not signatures[mime]:
-        raise RuntimeError(f"Unexpected image format: {mime!r}")
+        raise RuntimeError(
+            f"Unexpected image format: {mime!r}"
+        )
 
     return data, mime
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--episode", required=True)
+
     parser.add_argument(
         "--manifest",
         default="media-review/media-manifest.json"
     )
+
     parser.add_argument(
         "--output-root",
         default="media/ai-reconstructions"
     )
-    parser.add_argument("--max-images", type=int, default=5)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+
+    parser.add_argument(
+        "--max-images",
+        type=int,
+        default=5
+    )
+
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL
+    )
+
     args = parser.parse_args()
 
     if not 1 <= args.max_images <= 10:
-        print("ERROR: max-images must be between 1 and 10.", file=sys.stderr)
+        print(
+            "ERROR: max-images must be between 1 and 10.",
+            file=sys.stderr
+        )
         return 2
 
     episode_path = Path(args.episode)
     manifest_path = Path(args.manifest)
 
     if not episode_path.is_file() or not manifest_path.is_file():
-        print("ERROR: episode or manifest file not found.", file=sys.stderr)
+        print(
+            "ERROR: episode or manifest file not found.",
+            file=sys.stderr
+        )
         return 2
 
     try:
         title, scenes = read_episode(episode_path)
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        manifest = json.loads(
+            manifest_path.read_text(encoding="utf-8")
+        )
+
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"ERROR: cannot read input: {exc}", file=sys.stderr)
+        print(
+            f"ERROR: cannot read input: {exc}",
+            file=sys.stderr
+        )
         return 2
 
     if manifest.get("episode") != episode_path.stem:
-        print("ERROR: manifest episode does not match script.", file=sys.stderr)
+        print(
+            "ERROR: manifest episode does not match script.",
+            file=sys.stderr
+        )
         return 2
 
     scene_map = {
@@ -244,32 +315,52 @@ def main() -> int:
 
     for scene in scenes:
         number = scene["scene"]
+
         entry = scene_map.setdefault(
-            number, {"scene": int(number), "assets": []}
+            number,
+            {
+                "scene": int(number),
+                "assets": []
+            }
         )
+
         entry.setdefault("assets", [])
 
         if has_approved_image(entry):
-            print(f"Scene {number}: approved image exists; skipping.")
+            print(
+                f"Scene {number}: approved image exists; skipping."
+            )
             continue
 
         if has_ai_image(entry):
-            print(f"Scene {number}: AI image already exists; skipping.")
+            print(
+                f"Scene {number}: AI image already exists; skipping."
+            )
             continue
 
         if has_pending_archive_candidate(entry):
-            print(f"Scene {number}: archive candidate pending review; skipping.")
+            print(
+                f"Scene {number}: archive candidate pending review; skipping."
+            )
             continue
 
         targets.append((scene, entry))
 
     if not targets:
-        print("No eligible scenes. No API requests made.")
+        print(
+            "No eligible scenes. No API requests made."
+        )
         return 0
 
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    api_key = os.environ.get(
+        "GEMINI_API_KEY", ""
+    ).strip()
+
     if not api_key:
-        print("ERROR: GEMINI_API_KEY is not configured.", file=sys.stderr)
+        print(
+            "ERROR: GEMINI_API_KEY is not configured.",
+            file=sys.stderr
+        )
         return 2
 
     if len(targets) > args.max_images:
@@ -279,8 +370,15 @@ def main() -> int:
         )
         targets = targets[:args.max_images]
 
-    episode_dir = Path(args.output_root) / safe_stem(episode_path.stem)
-    episode_dir.mkdir(parents=True, exist_ok=True)
+    episode_dir = (
+        Path(args.output_root)
+        / safe_stem(episode_path.stem)
+    )
+
+    episode_dir.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     generated = 0
     failed = 0
@@ -290,16 +388,34 @@ def main() -> int:
         prompt = make_prompt(title, scene)
 
         try:
-            image_data, mime = call_gemini(prompt, api_key, args.model)
-            extension = ".png" if mime == "image/png" else ".jpg"
-            destination = episode_dir / f"scene-{number:02d}{extension}"
+            image_data, mime = call_gemini(
+                prompt,
+                api_key,
+                args.model
+            )
+
+            extension = (
+                ".png"
+                if mime == "image/png"
+                else ".jpg"
+            )
+
+            destination = (
+                episode_dir
+                / f"scene-{number:02d}{extension}"
+            )
 
             if destination.exists():
-                print(f"Scene {number}: file already exists; skipping.")
+                print(
+                    f"Scene {number}: file already exists; skipping."
+                )
                 continue
 
             destination.write_bytes(image_data)
-            digest = hashlib.sha256(image_data).hexdigest()
+
+            digest = hashlib.sha256(
+                image_data
+            ).hexdigest()
 
             entry["assets"].append({
                 "asset_id": f"scene-{number:02d}-ai-reconstruction",
@@ -309,9 +425,13 @@ def main() -> int:
                 "source_type": "ai_reconstruction",
                 "storage": "repository",
                 "local_path": destination.as_posix(),
-                "title": f"AI historical reconstruction - scene {number}",
+                "title": (
+                    f"AI historical reconstruction - scene {number}"
+                ),
                 "creator": "Generated with Google Gemini API",
-                "license": "AI-generated; review applicable Google API terms",
+                "license": (
+                    "AI-generated; review applicable Google API terms"
+                ),
                 "model": args.model,
                 "prompt": prompt,
                 "sha256": digest,
@@ -323,10 +443,14 @@ def main() -> int:
             })
 
             generated += 1
-            print(f"Scene {number}: generated PENDING image: {destination}")
+
+            print(
+                f"Scene {number}: generated PENDING image: {destination}"
+            )
 
         except Exception as exc:
             failed += 1
+
             print(
                 f"WARNING: Scene {number} failed: {exc}",
                 file=sys.stderr
@@ -336,13 +460,19 @@ def main() -> int:
         scene_map.values(),
         key=lambda item: int(item.get("scene", 0))
     )
+
     manifest.setdefault("policy", {})
+
     manifest["policy"]["ai_reconstructions_must_be_labelled"] = True
     manifest["policy"]["automatic_approval"] = False
     manifest["policy"]["only_approved_assets_render"] = True
 
     manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            indent=2
+        ) + "\n",
         encoding="utf-8"
     )
 
