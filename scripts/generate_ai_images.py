@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """Generate pending AI reconstructions for scenes with no archive candidates.
 
@@ -11,12 +12,13 @@ This script:
 - marks generated assets as pending, never approved.
 
 Requires GEMINI_API_KEY in the environment.
-Uses the Gemini Interactions API and Python standard library only.
+Uses the Gemini GenerateContent REST API and Python standard library only.
 """
 from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import json
 import os
 import re
@@ -26,7 +28,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
+API_URL = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent"
 DEFAULT_MODEL = "gemini-3.1-flash-lite-image"
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 USER_AGENT = "MusicShortsFactory/1.0 (AI visual preparation)"
@@ -116,18 +118,19 @@ Return a single image only.
 
 
 def call_gemini(prompt: str, api_key: str, model: str) -> tuple[bytes, str]:
+    """Call Gemini GenerateContent and extract its first returned image."""
     payload = {
-        "model": model,
-        "input": prompt,
-        "response_format": {
-            "type": "image",
-            "mime_type": "image/png",
-            "aspect_ratio": "4:3",
-            "image_size": "1K",
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {
+                "aspectRatio": "4:3",
+                "imageSize": "1K",
+            },
         },
     }
     request = urllib.request.Request(
-        API_URL,
+        API_URL.format(model=model),
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
@@ -154,18 +157,29 @@ def call_gemini(prompt: str, api_key: str, model: str) -> tuple[bytes, str]:
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise RuntimeError("Gemini API returned an unreadable response.") from None
 
-    output_image = result.get("output_image") or {}
-    encoded = output_image.get("data")
-    mime_type = str(output_image.get("mime_type") or "image/png").lower()
+    image_part = None
+    for candidate in result.get("candidates", []):
+        content = candidate.get("content") or {}
+        for part in content.get("parts", []):
+            inline_data = part.get("inlineData") or part.get("inline_data")
+            if inline_data and inline_data.get("data"):
+                image_part = inline_data
+                break
+        if image_part:
+            break
 
-    if not encoded:
-        # Surface a concise API message when no image was returned.
-        message = result.get("error") or result.get("message") or "No output_image returned."
-        raise RuntimeError(f"Gemini did not return an image: {message}")
+    if not image_part:
+        prompt_feedback = result.get("promptFeedback") or {}
+        block_reason = prompt_feedback.get("blockReason")
+        if block_reason:
+            raise RuntimeError(f"Gemini blocked the prompt: {block_reason}")
+        raise RuntimeError("Gemini response did not contain an image part.")
 
+    encoded = image_part.get("data")
+    mime_type = str(image_part.get("mimeType") or image_part.get("mime_type") or "").lower()
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
-    except (ValueError, base64.binascii.Error):
+    except (ValueError, binascii.Error):
         raise RuntimeError("Gemini returned invalid base64 image data.") from None
 
     if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
@@ -176,7 +190,7 @@ def call_gemini(prompt: str, api_key: str, model: str) -> tuple[bytes, str]:
         "image/jpeg": image_bytes.startswith(bytes.fromhex("FFD8FF")),
     }
     if mime_type not in signatures or not signatures[mime_type]:
-        raise RuntimeError(f"Generated image signature does not match MIME type {mime_type}.")
+        raise RuntimeError(f"Generated image signature does not match MIME type {mime_type!r}.")
 
     return image_bytes, mime_type
 
