@@ -1,5 +1,5 @@
 
-name: Search Media Candidates
+name: Search Media and Generate AI Images
 
 on:
   workflow_dispatch:
@@ -8,34 +8,166 @@ on:
         description: "Episode script path"
         required: true
         default: "episodes/sample-bohemian-rhapsody.txt"
+        type: string
+
+      max_images:
+        description: "Maximum AI images for this run (1-10)"
+        required: true
+        default: 5
+        type: number
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: media-generation-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  search:
+  prepare-media:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Search Wikimedia Commons candidates
+      - name: Validate inputs and episode
+        env:
+          EPISODE_FILE: ${{ inputs.episode_file }}
+          MAX_IMAGES: ${{ inputs.max_images }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          episode = Path(os.environ["EPISODE_FILE"])
+          limit = int(os.environ["MAX_IMAGES"])
+
+          if not episode.is_file():
+              raise SystemExit(f"Episode not found: {episode}")
+
+          if not 1 <= limit <= 10:
+              raise SystemExit("max_images must be between 1 and 10.")
+
+          print(f"Episode: {episode}")
+          print(f"AI image limit: {limit}")
+          PY
+
+      - name: Search Wikimedia candidates
+        env:
+          EPISODE_FILE: ${{ inputs.episode_file }}
         run: |
           python scripts/search_media.py \
-            --episode "${{ inputs.episode_file }}" \
-            --output media-review
+            --episode "$EPISODE_FILE" \
+            --output media-review-new
 
-      - name: Upload review bundle
+      - name: Prepare episode-specific manifest
+        env:
+          EPISODE_FILE: ${{ inputs.episode_file }}
+        run: |
+          set -euo pipefail
+
+          episode_name="$(basename "$EPISODE_FILE")"
+          episode_stem="${episode_name%.*}"
+          safe_stem="$(printf '%s' "$episode_stem" | \
+            sed 's/[^a-zA-Z0-9_-]/-/g')"
+
+          mkdir -p media-review/manifests
+
+          archive_dir="media-review/manifests"
+          target_manifest="$archive_dir/$safe_stem.json"
+          root_manifest="media-review/media-manifest.json"
+          incoming_manifest="media-review-new/media-manifest.json"
+
+          # Preserve the currently active manifest under its own episode.
+          if [ -f "$root_manifest" ]; then
+            current_episode="$(python -c \
+              'import json; print(json.load(open("media-review/media-manifest.json", encoding="utf-8")).get("episode", ""))')"
+
+            if [ -n "$current_episode" ]; then
+              current_safe="$(printf '%s' "$current_episode" | \
+                sed 's/[^a-zA-Z0-9_-]/-/g')"
+              cp "$root_manifest" "$archive_dir/$current_safe.json"
+            fi
+          fi
+
+          # Restore this episode's previous manifest if it exists.
+          if [ -f "$target_manifest" ]; then
+            cp "$target_manifest" "$root_manifest"
+
+            python scripts/merge_media_manifest.py \
+              --existing "$root_manifest" \
+              --incoming "$incoming_manifest" \
+              --output "$root_manifest"
+          else
+            # First run for this episode: use its fresh search manifest.
+            cp "$incoming_manifest" "$root_manifest"
+          fi
+
+          echo "Active episode manifest:"
+          python -c \
+            'import json; d=json.load(open("media-review/media-manifest.json", encoding="utf-8")); print(d.get("episode"))'
+
+      - name: Generate eligible AI reconstructions
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EPISODE_FILE: ${{ inputs.episode_file }}
+          MAX_IMAGES: ${{ inputs.max_images }}
+        run: |
+          python scripts/generate_ai_images.py \
+            --episode "$EPISODE_FILE" \
+            --manifest media-review/media-manifest.json \
+            --max-images "$MAX_IMAGES"
+
+      - name: Save episode manifest archive
+        env:
+          EPISODE_FILE: ${{ inputs.episode_file }}
+        run: |
+          set -euo pipefail
+
+          episode_name="$(basename "$EPISODE_FILE")"
+          episode_stem="${episode_name%.*}"
+          safe_stem="$(printf '%s' "$episode_stem" | \
+            sed 's/[^a-zA-Z0-9_-]/-/g')"
+
+          mkdir -p media-review/manifests
+          cp media-review/media-manifest.json \
+            "media-review/manifests/$safe_stem.json"
+
+      - name: Upload media review report
         uses: actions/upload-artifact@v4
         with:
           name: media-review-${{ github.run_number }}
-          path: media-review/
+          path: |
+            media-review-new/media-review.md
+            media-review-new/media-manifest.csv
+            media-review-new/media-manifest.json
           if-no-files-found: error
-          retention-days: 7
-          
+          retention-days: 14
+
+      - name: Commit manifest and generated images
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add media-review/media-manifest.json
+          git add media-review/manifests/
+          git add media/ai-reconstructions/
+
+          if git diff --cached --quiet; then
+            echo "No repository changes to commit."
+          else
+            git commit -m "Update approved-media review and AI image assets"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
