@@ -1,100 +1,102 @@
-# Music Shorts Factory
+Music Shorts Factory
 
-Free, phone-only system that turns a plain-text script into a vertical 1080x1920 MP4
-(30-60 seconds) with animated typography, music-documentary visuals, karaoke captions,
-free AI narration, and original generated background music.
+Free, phone-only system that turns a plain-text script into a vertical 1080x1920 MP4 (30–60 seconds) with animated typography, music-documentary visuals, karaoke captions, free text-to-speech narration, and original generated background music.
 
-Nothing here uses paid APIs, API keys, subscriptions, or paid assets. It never downloads
-commercial songs, music videos, album art, or lyrics.
+The project does not use paid APIs, API keys, subscriptions, or paid assets. It does not download commercial songs, music videos, album artwork, or lyrics.
 
-## One-time setup (Android Chrome)
+One-time setup (Android Chrome)
 
-1. Open github.com in Chrome, tap the three dots, and tick **Desktop site**.
-2. Make sure every file from the file tree exists in your repository.
-3. Open the **Actions** tab. If you see a green button saying
-   "I understand my workflows, go ahead and enable them", tap it.
-4. Open **Settings > Actions > General**. Scroll to **Workflow permissions**,
-   choose **Read and write permissions**, and tap **Save**.
-   (Only needed for the optional Release download. Without it, the artifact download still works.)
+1. Open github.com in Chrome and enable Desktop site from the browser menu.
+2. Make sure every required project file exists in your repository.
+3. Open the Actions tab.
+4. If GitHub shows a message asking you to enable workflows, tap I understand my workflows, go ahead and enable them.
+5. No additional repository write permission is required. The workflow uses read-only repository permission and saves the finished video as an Actions artifact.
 
-## Make a video
+Make a video
 
-1. Open the **Actions** tab, tap **Render Music Short** (left list; on a phone tap the
-   "All workflows" dropdown if you can't see it).
-2. Tap **Run workflow**. Keep the branch as `main`.
-3. Fill the boxes:
-   - **Script file**: `episodes/sample-bohemian-rhapsody.txt` (or your own file)
-   - **Generate free narration voice**: leave ticked
-   - **Generate original background music**: leave ticked
-   - **Also attach the MP4 to a GitHub Release**: leave ticked (easiest download)
-4. Tap the green **Run workflow** button. Refresh the page after a few seconds and tap the new run.
-5. Wait about 8-15 minutes (rough estimate). A green check means success.
+1. Open the Actions tab.
+2. Select Render Music Short. On a phone, you may need to open the All workflows dropdown.
+3. Tap Run workflow and keep the branch set to "main".
+4. Fill in the inputs:
+   - Script file: "episodes/sample-bohemian-rhapsody.txt"
+   - Generate free narration voice: leave enabled.
+   - Generate original background music: leave enabled.
+5. Tap the green Run workflow button.
+6. Refresh the page after a few seconds and open the new workflow run.
+7. Wait for the workflow to finish. Rendering time can vary. A green check means the workflow completed successfully.
 
-## Download the video
+Download the video
 
-**Easiest:** go to your repository's front page, tap **Releases** (right side or lower on
-the page), open the newest one, and tap the `.mp4` file under Assets.
+1. Open the completed workflow run.
+2. Scroll down to the Artifacts section.
+3. Tap the artifact named "music-short-NUMBER".
+4. Download the ZIP file and extract it using your Android Files app.
+5. Open the extracted folder. It should contain the MP4 video and an upload-notes text file with a suggested title, description, and hashtags.
 
-**Alternative:** open the finished run, scroll to **Artifacts**, tap
-`music-short-NUMBER`, and unzip it with the Files app. It contains the MP4 and a
-`...-upload-notes.txt` with a title, description and hashtags.
+Artifacts are retained for 14 days, so download your video before they expire.
 
-## Write your own episode
+Write your own episode
 
-Open the **episodes** folder, tap **Add file > Create new file**, and name it for example
-`episodes/my-song.txt`. Copy the sample file and edit it.
+1. Open the "episodes" folder.
+2. Tap Add file > Create new file.
+3. Name your file, for example: "episodes/my-song.txt".
+4. Use the sample episode as a template and edit its content.
 
-Top of the file (global settings):
+Global settings
 
-| Key | Meaning |
-|---|---|
-| `TITLE` | Required. Your YouTube title idea. |
-| `THEME` | `amber`, `crimson`, `teal`, `violet`, or `mono` |
-| `MOOD` | Music mood: `minor`, `major`, or `dreamy` |
-| `CHANNEL` | Small watermark text, like `@YourChannel` |
-| `HASHTAGS` | Goes into the upload notes file |
+These settings go at the top of the episode file:
 
-Then one block per scene, each starting with a line of three dashes `---`:
+Key| Meaning
+"TITLE"| Required. Your YouTube title idea.
+"THEME"| "amber", "crimson", "teal", "violet", or "mono".
+"MOOD"| "minor", "major", or "dreamy".
+"CHANNEL"| Optional watermark text, such as "@YourChannel".
+"HASHTAGS"| Hashtags included in the upload-notes file.
 
-| Key | Meaning |
-|---|---|
-| `NARRATION` | Required. What the voice says and the captions show. |
-| `VISUAL` | `waveform`, `vinyl`, `rings`, `spotlight`, or `timeline` |
-| `KICKER` | Small label above the headline |
-| `HEADLINE` | Big text. Use `\|` to choose line breaks. Max 3 lines. |
-| `YEAR` | Four-digit year. Used by the `timeline` visual (animated count-up). |
-| `SECONDS` | Optional minimum length for the scene |
+Scene settings
 
-Length guide: about 90-125 narration words and 6-8 scenes gives roughly 40-55 seconds.
-The workflow stops with a clear message if the result would be under 30 or over 60 seconds.
+Each scene must start with a line containing three dashes: "---".
 
-## Copyright rules built into this project
+Key| Meaning
+"NARRATION"| Required. The spoken narration and captions.
+"VISUAL"| "waveform", "vinyl", "rings", "spotlight", or "timeline".
+"KICKER"| Small label above the headline.
+"HEADLINE"| Large on-screen text. Use "|" to create line breaks.
+"YEAR"| Optional year used by the timeline visual.
+"SECONDS"| Optional minimum duration for the scene.
 
-- Never paste lyrics. The checker rejects any quoted passage longer than 8 words.
-- Never use real album covers, music-video clips, or song audio. Visuals are all drawn in code.
-- Facts about songs, artists and dates are fine. **Always fact-check before uploading.**
-  Scripts written by AI can contain mistakes.
+Use 3–14 scenes. Around 90–125 narration words across 6–8 scenes is a useful starting point for a 40–55 second video. The workflow will stop if the estimated video duration is outside 30–60 seconds.
 
-## If something goes wrong
+Copyright and content checks
 
-| Problem | What to do |
-|---|---|
-| Red X on "Check the script file" | Read the message. It names the scene and the problem. Fix the text file. |
-| "Episode file not found" | Check the spelling of the path in the Script file box. |
-| "Video would be only X seconds" or "over 60" | Add or remove narration. About 2.5 words = 1 second. |
-| Voice failed warning | The video still renders with captions only. Tell Claude the log text. |
-| Release step failed | Do step 4 in setup (Read and write permissions), or use the Artifacts download. |
-| Any other red step | Tap the red step, copy the last 30 lines, and paste them to Claude. |
+- Do not paste song lyrics into the script.
+- The script checker rejects quoted passages longer than 8 words.
+- Do not use commercial song recordings, music-video clips, or album artwork in this project.
+- The visuals are generated using code.
+- The background music is generated by the project and does not use commercial song samples.
+- Always fact-check claims about songs, artists, dates, and music history before uploading.
+- Review the final video yourself before publishing.
 
-## Free-tier notes
+If something goes wrong
 
-Public repositories get free Actions minutes. Private repositories get a monthly free
-allowance (check GitHub's current numbers). A single video uses roughly 8-15 minutes.
-Releases and artifacts in a public repo are visible to everyone, so use a private repo
-if you don't want drafts public.
+Problem| What to do
+Red X on Check the script file| Read the error message. It identifies the scene and the problem. Correct the episode text.
+Episode file not found| Check the spelling of the file path in the workflow input.
+Video is shorter than 30 seconds| Add narration or scenes.
+Video is longer than 60 seconds| Shorten the narration or remove a scene.
+Voice generation fails| Check the log. The program may fall back to espeak-ng or continue with captions only.
+Red X on another step| Open the failed step, copy the last 30 lines of its log, and use them to troubleshoot the problem.
 
-## About the audio
+Free-tier notes
 
-Narration uses the free open-source Piper voice (falls back to espeak-ng). Music is original
-ambient audio generated by code, so there are no licensing issues. For different music, you
-can add a track from YouTube's free Audio Library or the Shorts sound picker when you upload.
+GitHub Actions usage is subject to GitHub's current plan limits and usage policies. Check your account's current allowance before running many video renders.
+
+This repository is currently public. Its source code, episode scripts, workflow files, and accessible workflow artifacts may be visible to other people. Do not upload passwords, API keys, private information, or personal documents.
+
+Download your artifacts before the 14-day retention period ends.
+
+About the audio
+
+Narration uses the Piper text-to-speech voice when available, with espeak-ng as a fallback. The background music is generated by code.
+
+The project does not include commercial recordings. If you want to add a real song when editing or uploading, make sure you have the necessary rights or use music provided through YouTube's permitted music features. Do not assume that every song is cleared for every type of YouTube use.
