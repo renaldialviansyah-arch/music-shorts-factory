@@ -1,18 +1,18 @@
+
 #!/usr/bin/env python3
-"""Free narration (Piper, with espeak-ng fallback) and original generated music."""
+"""Kokoro am_michael narration and original generated music."""
 import array
 import math
 import random
 import shutil
 import subprocess
-import sys
 import time
-import urllib.request
 import wave
 from pathlib import Path
 
-PIPER_NAME = "en_US-lessac-medium"
-PIPER_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/"
+KOKORO_VOICE = "am_michael"
+KOKORO_SPEED = 1.08
+KOKORO_SAMPLE_RATE = 24000
 
 
 def run_quiet(cmd, **kwargs):
@@ -31,91 +31,134 @@ def probe_duration(path):
         raise RuntimeError(f"Could not read the length of {path}: {result.stderr.strip()}")
 
 
-def _download(url, destination, tries=3):
-    for attempt in range(1, tries + 1):
-        try:
-            with urllib.request.urlopen(url, timeout=90) as response, open(destination, "wb") as handle:
-                shutil.copyfileobj(response, handle)
-            return True
-        except Exception as error:  # noqa: BLE001
-            print(f"  download attempt {attempt} failed: {error}", flush=True)
-            time.sleep(3)
-    return False
+def synthesize_kokoro_scenes(texts, workdir):
+    """Create American-English narration using Kokoro am_michael."""
+    import numpy as np
+    import soundfile as sf
+    from kokoro import KPipeline
 
+    workdir.mkdir(parents=True, exist_ok=True)
 
-def ensure_piper_model(models_dir):
-    models_dir.mkdir(parents=True, exist_ok=True)
-    onnx = models_dir / f"{PIPER_NAME}.onnx"
-    meta = models_dir / f"{PIPER_NAME}.onnx.json"
-    if not (onnx.exists() and onnx.stat().st_size > 1_000_000 and meta.exists()):
-        print("  Downloading the free Piper voice model (about 60 MB)...", flush=True)
-        if not (_download(PIPER_BASE + onnx.name, onnx) and _download(PIPER_BASE + meta.name, meta)):
-            return None
-        if onnx.stat().st_size < 1_000_000:
-            return None
-    return str(onnx)
+    print(
+        f"  Loading Kokoro voice {KOKORO_VOICE} at {KOKORO_SPEED}x...",
+        flush=True,
+    )
+    pipeline = KPipeline(lang_code="a")
+    paths = []
 
+    for index, text in enumerate(texts):
+        out = workdir / f"narration_{index:02d}.wav"
+        out.unlink(missing_ok=True)
 
-def synth_piper(text, model, out_wav):
-    variants = [
-        [sys.executable, "-m", "piper", "--model", model, "--output_file", out_wav],
-        [sys.executable, "-m", "piper", "-m", model, "-f", out_wav],
-    ]
-    exe = shutil.which("piper")
-    if exe:
-        variants.append([exe, "--model", model, "--output_file", out_wav])
-    for cmd in variants:
-        Path(out_wav).unlink(missing_ok=True)
-        try:
-            result = subprocess.run(cmd, input=text.encode("utf-8"), capture_output=True, timeout=300)
-        except Exception as error:  # noqa: BLE001
-            print(f"  piper call failed: {error}")
-            continue
-        if result.returncode == 0 and Path(out_wav).exists() and Path(out_wav).stat().st_size > 2000:
-            return True
-        tail = result.stderr.decode("utf-8", "ignore").strip().splitlines()[-2:]
-        print(f"  piper variant failed: {' | '.join(tail)}")
-    return False
+        print(
+            f"  [Kokoro {KOKORO_VOICE}] scene {index + 1}/{len(texts)}",
+            flush=True,
+        )
+
+        chunks = []
+
+        for _graphemes, _phonemes, audio in pipeline(
+            text,
+            voice=KOKORO_VOICE,
+            speed=KOKORO_SPEED,
+        ):
+            if hasattr(audio, "detach"):
+                audio = audio.detach().cpu().numpy()
+
+            audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+
+            if audio.size:
+                chunks.append(audio)
+                # Natural short pause between generated speech chunks.
+                chunks.append(
+                    np.zeros(int(0.12 * KOKORO_SAMPLE_RATE), dtype=np.float32)
+                )
+
+        if not chunks:
+            raise RuntimeError(
+                f"Kokoro returned no audio for scene {index + 1}."
+            )
+
+        combined = np.concatenate(chunks)
+
+        sf.write(
+            str(out),
+            combined,
+            KOKORO_SAMPLE_RATE,
+            subtype="PCM_16",
+        )
+
+        if not out.exists() or out.stat().st_size < 2000:
+            raise RuntimeError(
+                f"Kokoro produced an empty audio file for scene {index + 1}."
+            )
+
+        paths.append(out)
+
+    return paths
 
 
 def synth_espeak(text, out_wav):
+    """Fallback voice if Kokoro cannot generate narration."""
     if not shutil.which("espeak-ng"):
         return False
+
     Path(out_wav).unlink(missing_ok=True)
+
     result = subprocess.run(
-        ["espeak-ng", "-v", "en-us", "-s", "155", "-p", "40", "-w", out_wav, "--stdin"],
+        [
+            "espeak-ng", "-v", "en-us",
+            "-s", "155", "-p", "40",
+            "-w", out_wav, "--stdin",
+        ],
         input=text.encode("utf-8"),
         capture_output=True,
         timeout=120,
     )
-    return result.returncode == 0 and Path(out_wav).exists() and Path(out_wav).stat().st_size > 2000
+
+    return (
+        result.returncode == 0
+        and Path(out_wav).exists()
+        and Path(out_wav).stat().st_size > 2000
+    )
 
 
 def synthesize_scenes(texts, workdir):
-    """Returns (list_of_wav_paths, engine_name). Empty list if no voice engine works."""
+    """Returns (list_of_wav_paths, engine_name)."""
     workdir.mkdir(parents=True, exist_ok=True)
-    engines = []
-    model = ensure_piper_model(Path(__file__).resolve().parent.parent / ".cache" / "models")
-    if model:
-        engines.append(("piper", lambda text, out: synth_piper(text, model, out)))
-    else:
-        print("  Piper voice model unavailable; will try the fallback voice.")
-    engines.append(("espeak-ng", synth_espeak))
 
-    for name, function in engines:
-        paths = []
-        ok = True
-        for index, text in enumerate(texts):
-            out = workdir / f"narration_{index:02d}.wav"
-            print(f"  [{name}] scene {index + 1}/{len(texts)}", flush=True)
-            if not function(text, str(out)):
-                ok = False
-                break
-            paths.append(out)
-        if ok:
-            return paths, name
-        print(f"  Voice engine '{name}' failed. Trying the next option...")
-    return [], None
+    try:
+        paths = synthesize_kokoro_scenes(texts, workdir)
+
+        print(
+            f"  Narration engine: Kokoro ({KOKORO_VOICE}, "
+            f"{KOKORO_SPEED}x speed)",
+            flush=True,
+        )
+
+        return paths, "kokoro-am_michael"
+
+    except Exception as error:
+        print(f"  Kokoro narration failed: {error}", flush=True)
+        print("  Trying espeak-ng fallback...", flush=True)
+
+    paths = []
+
+    for index, text in enumerate(texts):
+        out = workdir / f"narration_{index:02d}.wav"
+
+        print(
+            f"  [espeak-ng fallback] scene {index + 1}/{len(texts)}",
+            flush=True,
+        )
+
+        if not synth_espeak(text, str(out)):
+            return [], None
+
+        paths.append(out)
+
+    return paths, "espeak-ng-fallback"
+
 
 
 def build_narration_track(wavs, durations, lead_in, workdir):
