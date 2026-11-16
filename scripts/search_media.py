@@ -143,40 +143,100 @@ def request_json(params: dict[str, str]) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+
 def commons_search(query: str) -> list[dict[str, Any]]:
-    params = {
-        "action": "query",
-        "format": "json",
-        "generator": "search",
-        "gsrsearch": f"filetype:bitmap {query}",
-        "gsrnamespace": "6",
-        "gsrlimit": str(MAX_CANDIDATES),
-        "prop": "imageinfo",
-        "iiprop": "url|extmetadata",
-        "iiurlwidth": "640",
-    }
-    data = request_json(params)
-    pages = (data.get("query") or {}).get("pages") or {}
+    def search_once(search_query: str) -> list[dict[str, Any]]:
+        params = {
+            "action": "query",
+            "format": "json",
+            "generator": "search",
+            "gsrsearch": f"filetype:bitmap {search_query}",
+            "gsrnamespace": "6",
+            "gsrlimit": str(MAX_CANDIDATES),
+            "prop": "imageinfo",
+            "iiprop": "url|extmetadata",
+            "iiurlwidth": "640",
+        }
+
+        data = request_json(params)
+        pages = (data.get("query") or {}).get("pages") or {}
+        results = []
+
+        for page in pages.values():
+            info = (page.get("imageinfo") or [{}])[0]
+            meta = info.get("extmetadata") or {}
+
+            def meta_value(name: str) -> str:
+                value = meta.get(name, {}).get("value", "")
+                return html.unescape(
+                    re.sub(r"<[^>]+>", "", str(value))
+                ).strip()
+
+            results.append({
+                "title": page.get("title", ""),
+                "preview_url": info.get("thumburl") or info.get("url", ""),
+                "download_url": info.get("url", ""),
+                "source_page": info.get("descriptionurl", ""),
+                "creator": meta_value("Artist"),
+                "license": meta_value("LicenseShortName"),
+                "license_url": meta_value("LicenseUrl"),
+                "attribution": meta_value("Attribution"),
+                "media_type": "image",
+                "provider": "Wikimedia Commons",
+            })
+
+        return results
+
+    # Create progressively broader search queries.
+    words = query.split()
+    no_year = [
+        word for word in words
+        if not re.fullmatch(r"(18|19|20)\d{2}", word)
+    ]
+
+    variants = [
+        query,
+        " ".join(no_year[:6]),
+        " ".join(no_year[:4]),
+        " ".join(no_year[:3]),
+    ]
+
+    # Remove duplicate and empty queries.
+    unique_variants = []
+    for variant in variants:
+        variant = variant.strip()
+        if variant and variant.lower() not in [
+            item.lower() for item in unique_variants
+        ]:
+            unique_variants.append(variant)
+
     results = []
-    for page in pages.values():
-        info = (page.get("imageinfo") or [{}])[0]
-        meta = info.get("extmetadata") or {}
-        def meta_value(name: str) -> str:
-            value = meta.get(name, {}).get("value", "")
-            return html.unescape(re.sub(r"<[^>]+>", "", str(value))).strip()
-        results.append({
-            "title": page.get("title", ""),
-            "preview_url": info.get("thumburl") or info.get("url", ""),
-            "download_url": info.get("url", ""),
-            "source_page": info.get("descriptionurl", ""),
-            "creator": meta_value("Artist"),
-            "license": meta_value("LicenseShortName"),
-            "license_url": meta_value("LicenseUrl"),
-            "attribution": meta_value("Attribution"),
-            "media_type": "image",
-            "provider": "Wikimedia Commons",
-        })
-    return results
+    seen = set()
+
+    for search_query in unique_variants:
+        try:
+            candidates = search_once(search_query)
+        except Exception as exc:
+            print(
+                f"Search failed for '{search_query}': {exc}",
+                file=sys.stderr
+            )
+            continue
+
+        for item in candidates:
+            source = item.get("source_page", "")
+            if source and source not in seen:
+                seen.add(source)
+                item["matched_query"] = search_query
+                results.append(item)
+
+        if len(results) >= MAX_CANDIDATES:
+            break
+
+        time.sleep(0.2)
+
+    return results[:MAX_CANDIDATES]
+
 
 
 def main() -> int:
