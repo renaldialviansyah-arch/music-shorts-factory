@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 30
     env:
       EPISODE: ${{ inputs.episode_file }}
+      HF_HOME: ${{ github.workspace }}/.cache/huggingface
 
     steps:
       - name: Get the repository files
@@ -38,6 +39,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Cache Kokoro voice and model files
+        uses: actions/cache@v4
+        with:
+          path: .cache/huggingface
+          key: kokoro-am-michael-v1
 
       - name: Install FFmpeg, fallback voice and fonts
         run: |
@@ -53,13 +60,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
-          pip install piper-tts || echo "piper-tts could not be installed; the fallback voice will be used"
-
-      - name: Remember the voice model between runs
-        uses: actions/cache@v4
-        with:
-          path: .cache/models
-          key: piper-voice-lessac-v1
 
       - name: Check the script file
         run: python scripts/parse_script.py "$EPISODE"
