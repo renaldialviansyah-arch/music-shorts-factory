@@ -67,6 +67,66 @@ def read_episode(path: Path) -> tuple[str, list[dict[str, str]]]:
 
 
 
+
+def infer_scene_intent(scene: dict[str, str]) -> tuple[str, list[str]]:
+    text = " ".join([
+        scene.get("kicker", ""),
+        scene.get("headline", ""),
+        scene.get("narration", "")
+    ]).lower()
+
+    rules = [
+        (
+            "radio_broadcast",
+            ["radio", "dj ", "disc jockey", "airplay", "broadcaster",
+             "broadcast", "radio host", "presenter"],
+            ["radio studio", "radio DJ", "microphone"]
+        ),
+        (
+            "audience_demand",
+            ["listeners", "listener", "audience", "fans", "fan ",
+             "requested", "request", "demand", "crowd"],
+            ["music listeners", "music fans", "radio audience"]
+        ),
+        (
+            "music_charts",
+            ["number one", "number 1", "charts", "chart", "rank",
+             "weeks at", "sales", "top ten", "top 10"],
+            ["music charts", "record sales", "music ranking"]
+        ),
+        (
+            "music_release",
+            ["released", "release", "single", "vinyl", "record pressing"],
+            ["vinyl record", "music single", "record release"]
+        ),
+        (
+            "recording_studio",
+            ["recording", "recorded", "studio", "producer",
+             "track", "album session"],
+            ["recording studio", "music production", "audio mixing"]
+        ),
+        (
+            "live_performance",
+            ["concert", "performed", "performing", "live show",
+             "on stage", "performance"],
+            ["live music", "rock concert", "band performance"]
+        ),
+    ]
+
+    for name, keywords, search_terms in rules:
+        if any(keyword in text for keyword in keywords):
+            return name, search_terms
+
+    if any(word in text for word in ["follow", "subscribe"]):
+        return "music_documentary_closing", [
+            "music history", "rock music", "music archive"
+        ]
+
+    return "music_history_archive", [
+        "music history", "rock music", "historical music archive"
+    ]
+
+
 def make_query(
     scene: dict[str, str],
     episode_title: str,
@@ -92,10 +152,10 @@ def make_query(
                     result.append(word)
         return result
 
-    # Build context from the opening scene of this episode.
     opening = all_scenes[0] if all_scenes else scene
 
     context_text = " ".join([
+        episode_title,
         opening.get("kicker", ""),
         opening.get("headline", ""),
         opening.get("year", "")
@@ -103,36 +163,35 @@ def make_query(
 
     context = clean_words(context_text)
 
-    # Add useful words from the episode title if needed.
-    if len(context) < 2:
-        for word in clean_words(episode_title):
-            if word.lower() not in [x.lower() for x in context]:
-                context.append(word)
-
-    # Add scene-specific information.
-    local_text = " ".join([
+    scene_text = " ".join([
         scene.get("headline", ""),
-        scene.get("kicker", "")
+        scene.get("kicker", ""),
+        scene.get("narration", "")
     ])
 
-    local_words = clean_words(local_text)
+    scene_words = clean_words(scene_text)
+    intent_name, intent_terms = infer_scene_intent(scene)
 
-    # Combine episode context and scene-specific keywords.
-    selected = list(context)
+    selected = []
 
-    for word in local_words:
+    # Keep the episode identity at the beginning.
+    for word in context:
         if word.lower() not in [x.lower() for x in selected]:
             selected.append(word)
 
-    # Use narration only if the query is still too short.
-    if len(selected) < 5:
-        for word in clean_words(scene.get("narration", "")):
+    # Add scene-specific terms before generic intent terms.
+    for word in scene_words:
+        if word.lower() not in [x.lower() for x in selected]:
+            selected.append(word)
+
+    for phrase in intent_terms:
+        for word in clean_words(phrase):
             if word.lower() not in [x.lower() for x in selected]:
                 selected.append(word)
-            if len(selected) >= 7:
-                break
 
-    return " ".join(selected[:9]) or episode_title
+    # Keep the query concise for Wikimedia Commons.
+    return " ".join(selected[:12]) or episode_title
+
 
 
 
