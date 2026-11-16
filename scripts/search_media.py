@@ -24,34 +24,45 @@ USER_AGENT = "MusicShortsFactoryMediaReview/1.0 (GitHub Actions; educational pro
 MAX_CANDIDATES = 3
 
 
+
 def read_episode(path: Path) -> tuple[str, list[dict[str, str]]]:
     text = path.read_text(encoding="utf-8")
-    title_match = re.search(r"(?im)^\s*TITLE\s*:\s*(.+)$", text)
+
+    title_match = re.search(
+        r"(?im)^\s*TITLE\s*:\s*(.+)$", text
+    )
     title = title_match.group(1).strip() if title_match else path.stem
-    scenes: list[dict[str, str]] = []
-    current: dict[str, str] | None = None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if re.match(r"(?i)^SCENE\s+\d+", line):
-            if current:
-                scenes.append(current)
-            current = {"scene": re.search(r"\d+", line).group(0)}
-            continue
-        if current and ":" in line:
+
+    scenes = []
+    blocks = re.split(r"(?m)^\s*---\s*$", text)
+
+    for block in blocks:
+        scene = {}
+
+        for raw in block.splitlines():
+            line = raw.strip()
+
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+
             key, value = line.split(":", 1)
             key = key.strip().upper()
-            if key in {"KICKER", "HEADLINE", "NARRATION", "YEAR", "VISUAL"}:
-                current[key.lower()] = value.strip()
-    if current:
-        scenes.append(current)
-    if not scenes:
-        # Fallback: extract scene-like blocks using common headings.
-        blocks = re.split(r"(?im)^\s*SCENE\s+\d+.*$", text)
-        for idx, block in enumerate(blocks[1:], start=1):
-            cleaned = re.sub(r"\s+", " ", block).strip()
-            if cleaned:
-                scenes.append({"scene": str(idx), "narration": cleaned[:500]})
+
+            if key in {
+                "VISUAL", "KICKER", "HEADLINE",
+                "NARRATION", "YEAR"
+            }:
+                scene[key.lower()] = value.strip()
+
+        if scene and any(
+            scene.get(key)
+            for key in ("kicker", "headline", "narration")
+        ):
+            scene["scene"] = str(len(scenes) + 1)
+            scenes.append(scene)
+
     return title, scenes
+
 
 
 def make_query(scene: dict[str, str], episode_title: str) -> str:
