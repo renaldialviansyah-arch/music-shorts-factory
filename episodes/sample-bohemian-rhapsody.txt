@@ -1,0 +1,52 @@
+# Music Shorts Factory - sample episode (about 45-50 seconds)
+# Lines that start with # are notes and are ignored.
+# Everything above the first --- line is the video's global settings.
+
+TITLE: The Six-Minute Song Radio Said No To
+THEME: amber
+MOOD: minor
+CHANNEL: @YourChannelName
+HASHTAGS: #musichistory #rockhistory #queen #bohemianrhapsody #shorts
+
+---
+VISUAL: waveform
+KICKER: QUEEN - 1975
+HEADLINE: BOHEMIAN|RHAPSODY
+NARRATION: In 1975, Queen released Bohemian Rhapsody, a song radio was never supposed to play.
+
+---
+VISUAL: timeline
+YEAR: 1975
+KICKER: THE PROBLEM
+HEADLINE: TOO LONG|FOR RADIO
+NARRATION: At nearly six minutes, it was twice as long as a normal single, and executives worried.
+
+---
+VISUAL: vinyl
+KICKER: THE TWIST
+HEADLINE: A RADIO HOST|TAKES A CHANCE
+NARRATION: Then DJ Kenny Everett got an early copy and played it again and again in one weekend.
+
+---
+VISUAL: rings
+KICKER: THE DEMAND
+HEADLINE: LISTENERS|WANTED MORE
+NARRATION: Listeners kept asking for it, and the demand became impossible to ignore.
+
+---
+VISUAL: spotlight
+KICKER: OCTOBER 1975
+HEADLINE: THE RELEASE
+NARRATION: It was released that October, and it climbed to number one in the United Kingdom.
+
+---
+VISUAL: waveform
+KICKER: UK CHARTS
+HEADLINE: NINE WEEKS|AT NUMBER ONE
+NARRATION: It stayed there for nine weeks, proof that people will follow a great story, even a long one.
+
+---
+VISUAL: vinyl
+KICKER: MUSIC SHORTS
+HEADLINE: FOLLOW FOR|MORE STORIES
+NARRATION: Follow for more stories behind the songs that shaped rock.
