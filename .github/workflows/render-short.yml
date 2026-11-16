@@ -65,7 +65,13 @@ jobs:
         run: python scripts/parse_script.py "$EPISODE"
 
       - name: Build the video
-        run: python scripts/build_short.py --episode "$EPISODE" --voice "${{ inputs.voice }}" --music "${{ inputs.music }}" --out output
+        run: |
+          python scripts/build_short.py \
+            --episode "$EPISODE" \
+            --voice "${{ inputs.voice }}" \
+            --music "${{ inputs.music }}" \
+            --out output \
+            --media-manifest "$GITHUB_WORKSPACE/media-review/media-manifest.json"
 
       - name: Verify the MP4
         run: python scripts/verify_video.py --dir output
