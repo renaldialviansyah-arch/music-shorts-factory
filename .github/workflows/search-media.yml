@@ -1,0 +1,41 @@
+
+name: Search Media Candidates
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode_file:
+        description: "Episode script path"
+        required: true
+        default: "episodes/sample-bohemian-rhapsody.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Search Wikimedia Commons candidates
+        run: |
+          python scripts/search_media.py \
+            --episode "${{ inputs.episode_file }}" \
+            --output media-review
+
+      - name: Upload review bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-review-${{ github.run_number }}
+          path: media-review/
+          if-no-files-found: error
+          retention-days: 7
+          
