@@ -1,0 +1,94 @@
+name: Render Music Short
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode_file:
+        description: "Script file inside the episodes folder"
+        required: true
+        default: "episodes/sample-bohemian-rhapsody.txt"
+        type: string
+      voice:
+        description: "Generate free narration voice"
+        required: true
+        default: true
+        type: boolean
+      music:
+        description: "Generate original background music"
+        required: true
+        default: true
+        type: boolean
+      publish_release:
+        description: "Also attach the MP4 to a GitHub Release (easy direct download)"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EPISODE: ${{ inputs.episode_file }}
+    steps:
+      - name: Get the repository files
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install FFmpeg, fallback voice and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng
+          for pkg in fonts-oswald fonts-montserrat fonts-dejavu-core fonts-liberation; do
+            sudo apt-get install -y "$pkg" || echo "Font package $pkg not available, skipping"
+          done
+          fc-cache -f
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+          pip install piper-tts || echo "piper-tts could not be installed; the fallback voice will be used"
+
+      - name: Remember the voice model between runs
+        uses: actions/cache@v4
+        with:
+          path: .cache/models
+          key: piper-voice-lessac-v1
+
+      - name: Check the script file
+        run: python scripts/parse_script.py "$EPISODE"
+
+      - name: Build the video
+        run: python scripts/build_short.py --episode "$EPISODE" --voice "${{ inputs.voice }}" --music "${{ inputs.music }}" --out output
+
+      - name: Verify the MP4
+        run: python scripts/verify_video.py --dir output
+
+      - name: Save the MP4 as a downloadable artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-short-${{ github.run_number }}
+          path: output/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Attach the MP4 to a Release (direct download, no zip)
+        if: success() && inputs.publish_release == true
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "short-${{ github.run_number }}" output/*.mp4 output/*-upload-notes.txt \
+            --title "Short #${{ github.run_number }}" \
+            --notes "Rendered by Music Shorts Factory. Review and fact-check before uploading." \
+            --target "${{ github.sha }}"
