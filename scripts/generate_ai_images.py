@@ -1,24 +1,13 @@
 
 #!/usr/bin/env python3
-"""Generate pending AI reconstructions for scenes with no archive candidates.
+"""Generate pending AI reconstructions for eligible music documentary scenes."""
 
-This script:
-- never replaces or approves existing assets;
-- skips scenes that already have an approved image;
-- skips scenes that already have an AI reconstruction in the manifest;
-- generates at most --max-images per run;
-- makes one API request per scene, with no automatic retries;
-- writes AI images under media/ai-reconstructions/<episode>/;
-- marks generated assets as pending, never approved.
-
-Requires GEMINI_API_KEY in the environment.
-Uses the Gemini GenerateContent REST API and Python standard library only.
-"""
 from __future__ import annotations
 
 import argparse
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -28,20 +17,23 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-API_URL = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent"
+API_URL = (
+    "https://generativelanguage.googleapis.com/v1/"
+    "models/{model}:generateContent"
+)
 DEFAULT_MODEL = "gemini-3.1-flash-lite-image"
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
-USER_AGENT = "MusicShortsFactory/1.0 (AI visual preparation)"
+USER_AGENT = "MusicShortsFactory/1.0"
 
 
-def read_episode(path: Path) -> tuple[str, list[dict[str, str]]]:
+def read_episode(path: Path):
     raw = path.read_text(encoding="utf-8")
-    title_match = re.search(r"(?im)^\s*TITLE\s*:\s*(.+)$", raw)
-    title = title_match.group(1).strip() if title_match else path.stem
-    scenes: list[dict[str, str]] = []
+    match = re.search(r"(?im)^\s*TITLE\s*:\s*(.+)$", raw)
+    title = match.group(1).strip() if match else path.stem
+    scenes = []
 
     for block in re.split(r"(?m)^\s*---\s*$", raw):
-        item: dict[str, str] = {}
+        item = {}
         for line in block.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or ":" not in line:
@@ -50,6 +42,7 @@ def read_episode(path: Path) -> tuple[str, list[dict[str, str]]]:
             key = key.strip().upper()
             if key in {"VISUAL", "KICKER", "HEADLINE", "NARRATION", "YEAR"}:
                 item[key.lower()] = value.strip()
+
         if item and any(item.get(k) for k in ("kicker", "headline", "narration")):
             item["scene"] = str(len(scenes) + 1)
             scenes.append(item)
@@ -57,78 +50,85 @@ def read_episode(path: Path) -> tuple[str, list[dict[str, str]]]:
     return title, scenes
 
 
-def safe_episode_stem(value: str) -> str:
-    value = re.sub(r"[^a-zA-Z0-9_-]+", "-", value).strip("-")
-    if not value:
-        raise ValueError("Episode filename does not produce a safe folder name.")
-    return value[:80]
+def safe_stem(value: str) -> str:
+    result = re.sub(r"[^a-zA-Z0-9_-]+", "-", value).strip("-")
+    if not result:
+        raise ValueError("Invalid episode folder name.")
+    return result[:80]
 
 
-def scene_has_approved_image(scene_entry: dict[str, Any]) -> bool:
-    for asset in scene_entry.get("assets", []):
-        if (
-            str(asset.get("status", "")).lower() == "approved"
-            and str(asset.get("media_type", "")).lower() == "image"
-        ):
-            return True
-    return False
+def has_approved_image(entry: dict[str, Any]) -> bool:
+    return any(
+        str(a.get("status", "")).lower() == "approved"
+        and str(a.get("media_type", "")).lower() == "image"
+        for a in entry.get("assets", [])
+    )
 
 
-def scene_has_ai_image(scene_entry: dict[str, Any]) -> bool:
-    for asset in scene_entry.get("assets", []):
-        kind = str(asset.get("kind", "")).lower()
-        source = str(asset.get("source_type", "")).lower()
-        if kind == "ai_reconstruction" or source == "ai_reconstruction":
-            return True
-    return False
+def has_ai_image(entry: dict[str, Any]) -> bool:
+    return any(
+        a.get("kind") == "ai_reconstruction"
+        or a.get("source_type") == "ai_reconstruction"
+        for a in entry.get("assets", [])
+    )
+
+
+def has_pending_archive_candidate(entry: dict[str, Any]) -> bool:
+    return any(
+        str(a.get("status", "")).lower() == "pending"
+        and a.get("kind") != "ai_reconstruction"
+        and a.get("source_type") != "ai_reconstruction"
+        for a in entry.get("assets", [])
+    )
 
 
 def make_prompt(title: str, scene: dict[str, str]) -> str:
-    year = scene.get("year", "").strip()
-    kicker = scene.get("kicker", "").strip()
-    headline = scene.get("headline", "").replace("|", " ").strip()
-    narration = scene.get("narration", "").strip()
+    context = " | ".join(
+        value for value in (
+            scene.get("year", ""),
+            scene.get("kicker", ""),
+            scene.get("headline", "").replace("|", " "),
+            scene.get("narration", ""),
+            scene.get("visual", ""),
+        ) if value
+    )
 
-    context = " | ".join(x for x in [year, kicker, headline, narration] if x)
     return f"""
-Create one historically plausible cinematic documentary reconstruction image
-for a music-history YouTube Short about: {title}.
+Create one historically plausible cinematic documentary reconstruction
+image for a music-history YouTube Short about: {title}.
 
 SCENE CONTEXT:
 {context}
 
 VISUAL DIRECTION:
-- Depict the scene described above, not a generic music collage.
-- Era-appropriate objects, clothing, architecture, recording/radio equipment,
-  interiors, and photographic details.
-- 1970s British setting when the scene context indicates 1970s Britain.
-- Photorealistic staged historical reconstruction, not a claimed authentic
-  archival photograph.
-- Warm amber tungsten lighting, deep natural shadows, subtle analog film grain,
-  restrained vintage documentary color grading.
-- Landscape 4:3 composition, medium-wide documentary framing, clear focal
-  subject, realistic proportions and believable period details.
-- No words, captions, dates, labels, logos, album covers, watermarks, or borders.
-- Do not imitate or depict the recognizable face of a real person. If the
-  narration names a real person, use a generic non-identifiable stand-in.
-- Do not invent legible newspaper headlines, chart positions, record labels,
-  or historical documents.
-Return a single image only.
+- Depict the specific scene, not a generic music collage.
+- Use era-appropriate objects, clothing, architecture and equipment.
+- Photorealistic staged historical reconstruction.
+- Never present the image as an authentic archival photograph.
+- Warm amber tungsten lighting, deep natural shadows and subtle analog film grain.
+- Landscape 4:3 composition, medium-wide documentary framing.
+- No words, captions, dates, labels, logos, album covers, watermarks or borders.
+- Do not imitate recognizable faces of real people.
+- Use generic non-identifiable people when a real person is mentioned.
+- Do not invent readable historical documents or newspaper headlines.
+Return one image only.
 """.strip()
 
 
-def call_gemini(prompt: str, api_key: str, model: str) -> tuple[bytes, str]:
-    """Call Gemini GenerateContent and extract its first returned image."""
+def call_gemini(prompt: str, api_key: str, model: str):
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "responseModalities": ["IMAGE"],
-            "imageConfig": {
-                "aspectRatio": "4:3",
-                "imageSize": "1K",
-            },
-        },
+            "responseFormat": {
+                "image": {
+                    "aspectRatio": "4:3",
+                    "imageSize": "1K"
+                }
+            }
+        }
     }
+
     request = urllib.request.Request(
         API_URL.format(model=model),
         data=json.dumps(payload).encode("utf-8"),
@@ -144,204 +144,214 @@ def call_gemini(prompt: str, api_key: str, model: str) -> tuple[bytes, str]:
         with urllib.request.urlopen(request, timeout=180) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
-        # Do not print request headers or API key.
-        detail = exc.read(3000).decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"Gemini API returned HTTP {exc.code}: {detail}"
-        ) from None
+        detail = exc.read(2000).decode("utf-8", errors="replace")
+        raise RuntimeError(f"Gemini HTTP {exc.code}: {detail}") from None
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Gemini API connection failed: {exc.reason}") from None
+        raise RuntimeError(f"Gemini connection failed: {exc.reason}") from None
 
     try:
         result = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RuntimeError("Gemini API returned an unreadable response.") from None
+        raise RuntimeError("Gemini returned an unreadable response.") from None
 
     image_part = None
     for candidate in result.get("candidates", []):
         content = candidate.get("content") or {}
         for part in content.get("parts", []):
-            inline_data = part.get("inlineData") or part.get("inline_data")
-            if inline_data and inline_data.get("data"):
-                image_part = inline_data
+            inline = part.get("inlineData") or part.get("inline_data")
+            if inline and inline.get("data"):
+                image_part = inline
                 break
         if image_part:
             break
 
     if not image_part:
-        prompt_feedback = result.get("promptFeedback") or {}
-        block_reason = prompt_feedback.get("blockReason")
-        if block_reason:
-            raise RuntimeError(f"Gemini blocked the prompt: {block_reason}")
-        raise RuntimeError("Gemini response did not contain an image part.")
+        feedback = result.get("promptFeedback") or {}
+        reason = feedback.get("blockReason")
+        if reason:
+            raise RuntimeError(f"Gemini blocked the prompt: {reason}")
+        raise RuntimeError("Gemini response contained no image.")
 
-    encoded = image_part.get("data")
-    mime_type = str(image_part.get("mimeType") or image_part.get("mime_type") or "").lower()
+    mime = str(
+        image_part.get("mimeType")
+        or image_part.get("mime_type")
+        or ""
+    ).lower()
+
     try:
-        image_bytes = base64.b64decode(encoded, validate=True)
-    except (ValueError, binascii.Error):
-        raise RuntimeError("Gemini returned invalid base64 image data.") from None
+        data = base64.b64decode(image_part["data"], validate=True)
+    except (ValueError, binascii.Error, KeyError):
+        raise RuntimeError("Gemini returned invalid image data.") from None
 
-    if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
-        raise RuntimeError("Generated image is empty or exceeds the 15 MB safety limit.")
+    if not data or len(data) > MAX_IMAGE_BYTES:
+        raise RuntimeError("Image is empty or exceeds the 15 MB limit.")
 
     signatures = {
-        "image/png": image_bytes.startswith(bytes.fromhex("89504E470D0A1A0A")),
-        "image/jpeg": image_bytes.startswith(bytes.fromhex("FFD8FF")),
+        "image/png": data.startswith(bytes.fromhex("89504E470D0A1A0A")),
+        "image/jpeg": data.startswith(bytes.fromhex("FFD8FF")),
     }
-    if mime_type not in signatures or not signatures[mime_type]:
-        raise RuntimeError(f"Generated image signature does not match MIME type {mime_type!r}.")
 
-    return image_bytes, mime_type
+    if mime not in signatures or not signatures[mime]:
+        raise RuntimeError(f"Unexpected image format: {mime!r}")
+
+    return data, mime
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episode", required=True, help="Episode text file")
+    parser.add_argument("--episode", required=True)
     parser.add_argument(
-        "--manifest", default="media-review/media-manifest.json",
-        help="Existing media manifest; updated in place without replacing approved assets",
+        "--manifest",
+        default="media-review/media-manifest.json"
     )
     parser.add_argument(
-        "--output-root", default="media/ai-reconstructions",
-        help="Directory for generated images",
+        "--output-root",
+        default="media/ai-reconstructions"
     )
     parser.add_argument("--max-images", type=int, default=5)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     args = parser.parse_args()
 
     if not 1 <= args.max_images <= 10:
-        print("ERROR: --max-images must be between 1 and 10.", file=sys.stderr)
+        print("ERROR: max-images must be between 1 and 10.", file=sys.stderr)
         return 2
 
     episode_path = Path(args.episode)
     manifest_path = Path(args.manifest)
-    if not episode_path.is_file():
-        print(f"ERROR: episode file not found: {episode_path}", file=sys.stderr)
-        return 2
-    if not manifest_path.is_file():
-        print(f"ERROR: media manifest not found: {manifest_path}", file=sys.stderr)
+
+    if not episode_path.is_file() or not manifest_path.is_file():
+        print("ERROR: episode or manifest file not found.", file=sys.stderr)
         return 2
 
     try:
         title, scenes = read_episode(episode_path)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"ERROR: cannot read episode or manifest: {exc}", file=sys.stderr)
+        print(f"ERROR: cannot read input: {exc}", file=sys.stderr)
         return 2
 
-    episode_stem = safe_episode_stem(episode_path.stem)
     if manifest.get("episode") != episode_path.stem:
-        print("ERROR: manifest episode does not match the selected episode.", file=sys.stderr)
+        print("ERROR: manifest episode does not match script.", file=sys.stderr)
         return 2
 
-    manifest_scenes = {
+    scene_map = {
         str(item.get("scene")): item
         for item in manifest.get("scenes", [])
         if isinstance(item, dict)
     }
 
-    targets: list[tuple[dict[str, str], dict[str, Any]]] = []
+    targets = []
+
     for scene in scenes:
         number = scene["scene"]
-        entry = manifest_scenes.setdefault(number, {"scene": int(number), "assets": []})
+        entry = scene_map.setdefault(
+            number, {"scene": int(number), "assets": []}
+        )
         entry.setdefault("assets", [])
-        if scene_has_approved_image(entry):
-            print(f"Scene {number}: approved image exists; skipping AI generation.")
+
+        if has_approved_image(entry):
+            print(f"Scene {number}: approved image exists; skipping.")
             continue
-        if scene_has_ai_image(entry):
-            print(f"Scene {number}: AI reconstruction already exists; skipping duplicate.")
+
+        if has_ai_image(entry):
+            print(f"Scene {number}: AI image already exists; skipping.")
             continue
-        # Do not spend API budget when Wikimedia candidates still need review.
-        if entry.get("assets"):
-            print(
-                f"Scene {number}: archive candidate(s) are awaiting review; "
-                "skipping AI generation for now."
-            )
+
+        if has_pending_archive_candidate(entry):
+            print(f"Scene {number}: archive candidate pending review; skipping.")
             continue
+
         targets.append((scene, entry))
 
     if not targets:
-        print("No eligible scenes need AI images. No API requests made.")
+        print("No eligible scenes. No API requests made.")
         return 0
 
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
-        print("ERROR: GEMINI_API_KEY secret is not configured.", file=sys.stderr)
+        print("ERROR: GEMINI_API_KEY is not configured.", file=sys.stderr)
         return 2
 
     if len(targets) > args.max_images:
         print(
-            f"Eligible scenes: {len(targets)}; per-run cap: {args.max_images}. "
-            "Only the first scenes will be generated."
+            f"{len(targets)} eligible scenes; limiting this run "
+            f"to {args.max_images} images."
         )
         targets = targets[:args.max_images]
 
-    episode_dir = Path(args.output_root) / episode_stem
+    episode_dir = Path(args.output_root) / safe_stem(episode_path.stem)
     episode_dir.mkdir(parents=True, exist_ok=True)
+
     generated = 0
     failed = 0
 
     for scene, entry in targets:
         number = int(scene["scene"])
         prompt = make_prompt(title, scene)
-        try:
-            image_bytes, mime_type = call_gemini(prompt, api_key, args.model)
-            extension = ".png" if mime_type == "image/png" else ".jpg"
-            filename = f"scene-{number:02d}{extension}"
-            destination = episode_dir / filename
-            destination.write_bytes(image_bytes)
 
-            relative_path = destination.as_posix()
-            asset = {
+        try:
+            image_data, mime = call_gemini(prompt, api_key, args.model)
+            extension = ".png" if mime == "image/png" else ".jpg"
+            destination = episode_dir / f"scene-{number:02d}{extension}"
+
+            if destination.exists():
+                print(f"Scene {number}: file already exists; skipping.")
+                continue
+
+            destination.write_bytes(image_data)
+            digest = hashlib.sha256(image_data).hexdigest()
+
+            entry["assets"].append({
                 "asset_id": f"scene-{number:02d}-ai-reconstruction",
                 "status": "pending",
                 "media_type": "image",
                 "kind": "ai_reconstruction",
                 "source_type": "ai_reconstruction",
                 "storage": "repository",
-                "local_path": relative_path,
+                "local_path": destination.as_posix(),
                 "title": f"AI historical reconstruction - scene {number}",
                 "creator": "Generated with Google Gemini API",
                 "license": "AI-generated; review applicable Google API terms",
                 "model": args.model,
                 "prompt": prompt,
-                "sha256": "",
+                "sha256": digest,
                 "notes": (
                     "AI reconstruction, not an authentic archival photograph. "
-                    "Review image and historical accuracy before approval. "
+                    "Review historical accuracy before approval. "
                     "Display label: AI RECONSTRUCTION."
                 ),
-            }
-            entry["assets"].append(asset)
+            })
+
             generated += 1
-            print(f"Scene {number}: generated pending AI image at {relative_path}.")
+            print(f"Scene {number}: generated PENDING image: {destination}")
+
         except Exception as exc:
             failed += 1
-            print(f"WARNING: Scene {number}: generation failed: {exc}", file=sys.stderr)
-            # No retry; existing archive/SVG fallback remains available.
+            print(
+                f"WARNING: Scene {number} failed: {exc}",
+                file=sys.stderr
+            )
 
-    # Preserve all pre-existing manifest fields and assets.
     manifest["scenes"] = sorted(
-        manifest_scenes.values(),
+        scene_map.values(),
         key=lambda item: int(item.get("scene", 0))
     )
     manifest.setdefault("policy", {})
     manifest["policy"]["ai_reconstructions_must_be_labelled"] = True
     manifest["policy"]["automatic_approval"] = False
     manifest["policy"]["only_approved_assets_render"] = True
+
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+        encoding="utf-8"
     )
 
     print(
-        f"AI generation complete: {generated} created, {failed} failed. "
-        "All generated assets remain PENDING."
+        f"Finished: {generated} generated, {failed} failed. "
+        "All generated images remain PENDING."
     )
-    if failed:
-        return 1
-    return 0
+
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
