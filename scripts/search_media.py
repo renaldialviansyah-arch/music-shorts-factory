@@ -66,7 +66,12 @@ def read_episode(path: Path) -> tuple[str, list[dict[str, str]]]:
 
 
 
-def make_query(scene: dict[str, str], episode_title: str) -> str:
+
+def make_query(
+    scene: dict[str, str],
+    episode_title: str,
+    all_scenes: list[dict[str, str]] | None = None
+) -> str:
     stop = {
         "the", "and", "for", "with", "from", "that", "this",
         "was", "were", "are", "his", "her", "their", "they",
@@ -75,7 +80,7 @@ def make_query(scene: dict[str, str], episode_title: str) -> str:
         "but", "not", "you", "your", "its", "has", "had",
         "have", "who", "in", "on", "at", "to", "of", "a",
         "an", "it", "as", "is", "be", "by", "or", "nearly",
-        "nevertheless", "twice", "long"
+        "twice", "long", "more", "wanted"
     }
 
     def clean_words(value: str) -> list[str]:
@@ -87,34 +92,41 @@ def make_query(scene: dict[str, str], episode_title: str) -> str:
                     result.append(word)
         return result
 
-    headline = clean_words(scene.get("headline", ""))
-    kicker = clean_words(scene.get("kicker", ""))
-    year = clean_words(scene.get("year", ""))
+    # Build context from the opening scene of this episode.
+    opening = all_scenes[0] if all_scenes else scene
 
-    narration = scene.get("narration", "")
+    context_text = " ".join([
+        opening.get("kicker", ""),
+        opening.get("headline", ""),
+        opening.get("year", "")
+    ])
 
-    # Look for possible names of people, bands, and places.
-    proper_names = re.findall(
-        r"\b(?:[A-Z][a-z]+|[A-Z]{2,})"
-        r"(?:\s+(?:[A-Z][a-z]+|[A-Z]{2,})){1,3}\b",
-        narration
-    )
+    context = clean_words(context_text)
 
-    names = []
-    for phrase in proper_names:
-        phrase_words = clean_words(phrase)
-        if phrase_words:
-            names.extend(phrase_words)
+    # Add useful words from the episode title if needed.
+    if len(context) < 2:
+        for word in clean_words(episode_title):
+            if word.lower() not in [x.lower() for x in context]:
+                context.append(word)
 
-    # Prioritize headline, kicker, names, and year.
-    selected = []
-    for word in headline + kicker + names + year:
+    # Add scene-specific information.
+    local_text = " ".join([
+        scene.get("headline", ""),
+        scene.get("kicker", "")
+    ])
+
+    local_words = clean_words(local_text)
+
+    # Combine episode context and scene-specific keywords.
+    selected = list(context)
+
+    for word in local_words:
         if word.lower() not in [x.lower() for x in selected]:
             selected.append(word)
 
-    # Add only a few useful narration terms if needed.
-    if len(selected) < 4:
-        for word in clean_words(narration):
+    # Use narration only if the query is still too short.
+    if len(selected) < 5:
+        for word in clean_words(scene.get("narration", "")):
             if word.lower() not in [x.lower() for x in selected]:
                 selected.append(word)
             if len(selected) >= 7:
@@ -200,7 +212,7 @@ def main() -> int:
 
     for scene in scenes:
         scene_no = scene.get("scene", str(len(manifest["scenes"]) + 1))
-        query = make_query(scene, title)
+        query = make_query(scene, title, scenes)
         report.extend([f"## Scene {scene_no}", f"- Search query: `{query}`", ""])
         scene_assets = []
         try:
